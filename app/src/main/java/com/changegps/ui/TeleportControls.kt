@@ -29,38 +29,33 @@ fun TeleportControls(
     onGo: (LatLng) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var lat by remember { mutableStateOf("") }
-    var lon by remember { mutableStateOf("") }
+    var coord by remember { mutableStateOf("") }
     var err by remember { mutableStateOf<String?>(null) }
 
     Column(modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-        Text("點地圖任一點即傳送，或輸入座標：")
+        Text("點地圖任一點即傳送，或輸入座標（緯度, 經度）：")
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             OutlinedTextField(
-                value = lat,
-                onValueChange = { lat = it },
-                label = { Text("緯度 lat") },
+                value = coord,
+                onValueChange = { coord = it },
+                label = { Text("緯度, 經度") },
+                placeholder = { Text("25.033964, 121.564468") },
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                modifier = Modifier.weight(1f),
-            )
-            OutlinedTextField(
-                value = lon,
-                onValueChange = { lon = it },
-                label = { Text("經度 lon") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                 modifier = Modifier.weight(1f),
             )
             Button(onClick = {
-                val la = lat.trim().toDoubleOrNull()
-                val lo = lon.trim().toDoubleOrNull()
-                if (la == null || lo == null || la !in -90.0..90.0 || lo !in -180.0..180.0) {
-                    err = "座標格式不正確"
+                val parts = coord.split(",")
+                val la = parts.getOrNull(0)?.trim()?.toDoubleOrNull()
+                val lo = parts.getOrNull(1)?.trim()?.toDoubleOrNull()
+                if (parts.size != 2 || la == null || lo == null ||
+                    la !in -90.0..90.0 || lo !in -180.0..180.0
+                ) {
+                    err = "格式錯誤，請輸入「緯度, 經度」，例如 25.033, 121.564"
                 } else {
                     err = null
                     onGo(LatLng(la, lo))

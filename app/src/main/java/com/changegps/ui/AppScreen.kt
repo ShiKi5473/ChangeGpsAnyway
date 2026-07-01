@@ -4,22 +4,32 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -30,15 +40,23 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import com.changegps.mock.MockController
 import com.changegps.mock.MockState
 import com.changegps.mock.Mode
 import com.changegps.util.LatLng
 import kotlinx.coroutines.delay
+
+/** Distinct green for the "start" action so it contrasts with the red "stop". */
+private val StartGreen = Color(0xFF2E7D32)
 
 /** Lambdas the UI needs from the host Activity (permissions, service control). */
 data class AppActions(
@@ -74,18 +92,26 @@ fun AppScreen(
             .imePadding(),
     ) {
         // ============ TOP ZONE — mode tabs (fixed height) ============
-        TabRow(selectedTabIndex = state.mode.ordinal) {
+        // zIndex keeps the tabs drawn ABOVE the native map view, which can briefly
+        // paint outside its bounds while loading tiles.
+        TabRow(
+            selectedTabIndex = state.mode.ordinal,
+            modifier = Modifier.zIndex(1f),
+        ) {
             ModeTab("傳送/飛人", state.mode == Mode.TELEPORT) { MockController.setMode(Mode.TELEPORT) }
             ModeTab("路線/種花", state.mode == Mode.ROUTE) { MockController.setMode(Mode.ROUTE) }
             ModeTab("搖桿", state.mode == Mode.JOYSTICK) { MockController.setMode(Mode.JOYSTICK) }
         }
 
         // ============ MIDDLE ZONE — map (flexes to fill remaining space) ============
-        Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+        // clipToBounds prevents the heavyweight osmdroid view from overdrawing the
+        // tabs above it during measurement / tile rendering.
+        Box(modifier = Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
             OsmMap(
                 emitted = state.emitted,
                 waypoints = state.waypoints,
                 centerOn = centerRequest,
+                target = if (state.mode == Mode.TELEPORT) state.teleportTarget else null,
                 onTap = { p ->
                     when (state.mode) {
                         Mode.TELEPORT -> {
@@ -165,11 +191,17 @@ fun AppScreen(
                         onRemoveLast = { MockController.removeLastWaypoint() },
                         onClear = { MockController.clearWaypoints() },
                     )
-                    Mode.JOYSTICK -> Text(
-                        "先點地圖設定起點，再開啟懸浮搖桿，即可在其他 App 上移動定位。\n種花時請讓手機保持輕微晃動以產生步數。",
-                        modifier = Modifier.padding(horizontal = 12.dp),
+                    Mode.JOYSTICK -> JoystickControls(
+                        maxSpeedKmh = state.joystickSpeedKmh,
+                        currentSpeedKmh = state.currentSpeedKmh,
+                        onMaxSpeedChange = { MockController.setJoystickSpeedKmh(it) },
                     )
                 }
+
+                PushIntervalControls(
+                    tickMs = state.tickMs,
+                    onSelect = { MockController.setTickMs(it) },
+                )
 
                 CooldownBar(state)
 
@@ -178,26 +210,103 @@ fun AppScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     if (state.running) {
-                        Button(onClick = actions.onStop, modifier = Modifier.weight(1f)) {
-                            Text("停止模擬")
+                        Button(
+                            onClick = actions.onStop,
+                            modifier = Modifier.weight(1f).height(52.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.error,
+                                contentColor = MaterialTheme.colorScheme.onError,
+                            ),
+                        ) {
+                            Icon(Icons.Default.Stop, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("停止模擬", style = MaterialTheme.typography.titleMedium)
                         }
                     } else {
                         Button(
                             onClick = actions.onStart,
                             enabled = hasLocation,
-                            modifier = Modifier.weight(1f),
-                        ) { Text("開始模擬") }
+                            modifier = Modifier.weight(1f).height(52.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = StartGreen,
+                                contentColor = Color.White,
+                            ),
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("開始模擬", style = MaterialTheme.typography.titleMedium)
+                        }
                     }
 
                     if (state.mode == Mode.JOYSTICK) {
                         OutlinedButton(
                             onClick = if (hasOverlay) actions.onStartOverlay else actions.onOpenOverlaySettings,
-                            modifier = Modifier.weight(1f),
+                            modifier = Modifier.weight(1f).height(52.dp),
                         ) { Text(if (hasOverlay) "開啟搖桿" else "授權懸浮窗") }
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * Push-interval selector: three presets (1000 / 250 / 100 ms) plus a manual field.
+ * Lower = smoother motion & faster teleport; higher = more natural / battery-friendly.
+ */
+@Composable
+private fun PushIntervalControls(tickMs: Long, onSelect: (Long) -> Unit) {
+    var manual by remember(tickMs) { mutableStateOf(tickMs.toString()) }
+    val presets = listOf(1000L, 250L, 100L)
+
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+        Text("推送間隔（越小越即時，越大越省電/自然）")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            presets.forEach { p ->
+                FilterChip(
+                    selected = tickMs == p,
+                    onClick = { onSelect(p) },
+                    label = { Text("${p}ms") },
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedTextField(
+                value = manual,
+                onValueChange = { manual = it.filter(Char::isDigit).take(4) },
+                label = { Text("手動 (50–5000 ms)") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                modifier = Modifier.weight(1f),
+            )
+            Button(onClick = { manual.toLongOrNull()?.let(onSelect) }) { Text("套用") }
+        }
+    }
+}
+
+@Composable
+private fun JoystickControls(
+    maxSpeedKmh: Double,
+    currentSpeedKmh: Double,
+    onMaxSpeedChange: (Double) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+        Text("先點地圖設定起點，再開啟懸浮搖桿，即可在其他 App 上移動定位。")
+        Text(
+            "目前速度：%.1f km/h".format(currentSpeedKmh),
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Text("最高速度（搖桿推到底）：%.1f km/h".format(maxSpeedKmh))
+        Slider(
+            value = maxSpeedKmh.toFloat(),
+            onValueChange = { onMaxSpeedChange(it.toDouble()) },
+            valueRange = 1f..30f,
+        )
+        Text("種花時請讓手機保持輕微晃動以產生步數。")
     }
 }
 

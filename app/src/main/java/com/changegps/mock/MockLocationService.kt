@@ -74,7 +74,6 @@ class MockLocationService : Service() {
     }
 
     private fun startTickLoop() = scope.launch {
-        val dtSec = TICK_MS / 1000.0
         var pos: LatLng? = MockController.current.let { it.emitted ?: it.teleportTarget }
         var bearing = 0.0
         var routeSim: RouteSimulator? = null
@@ -82,6 +81,8 @@ class MockLocationService : Service() {
 
         while (isActive) {
             val s = MockController.current
+            // Read the interval live so preset/manual changes take effect immediately.
+            val dtSec = s.tickMs / 1000.0
             var speedMs = 0.0
 
             when (s.mode) {
@@ -121,9 +122,9 @@ class MockLocationService : Service() {
 
             pos?.let { p ->
                 engine.push(p, s.altitude, speedMs, bearing, s.accuracyM)
-                MockController.setEmitted(p)
+                MockController.setEmitted(p, speedMs)
             }
-            delay(TICK_MS)
+            delay(s.tickMs)
         }
     }
 
@@ -193,7 +194,6 @@ class MockLocationService : Service() {
     companion object {
         private const val CHANNEL_ID = "mock_location"
         private const val NOTIF_ID = 1001
-        private const val TICK_MS = 1000L
         private const val MAX_WAKELOCK_MS = 6 * 60 * 60 * 1000L // safety cap
         const val ACTION_STOP = "com.changegps.action.STOP"
 

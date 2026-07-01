@@ -34,8 +34,10 @@ data class MockState(
     val joystickSpeedKmh: Double = 4.5,
     val altitude: Double = 25.0,
     val accuracyM: Float = 5f,
+    val tickMs: Long = 250L,
     // ---- output / observed ----
     val emitted: LatLng? = null,
+    val currentSpeedKmh: Double = 0.0,
     val lastTeleportAt: Long = 0L,
     val lastTeleportDistanceM: Double = 0.0,
     val error: String? = null,
@@ -80,12 +82,16 @@ object MockController {
 
     fun setJoystick(v: JoyVector?) = _state.update { it.copy(joystick = v) }
 
+    /** Push interval in ms. Clamped to a sane range; the tick loop reads it live. */
+    fun setTickMs(ms: Long) = _state.update { it.copy(tickMs = ms.coerceIn(50L, 5000L)) }
+
     fun setRunning(running: Boolean) = _state.update { it.copy(running = running) }
 
     fun setError(msg: String?) = _state.update { it.copy(error = msg) }
 
-    /** Called by the service loop after each emitted fix. */
-    fun setEmitted(p: LatLng) = _state.update { it.copy(emitted = p) }
+    /** Called by the service loop after each emitted fix, with the speed used (m/s). */
+    fun setEmitted(p: LatLng, speedMs: Double = 0.0) =
+        _state.update { it.copy(emitted = p, currentSpeedKmh = speedMs * 3.6) }
 
     /**
      * Suggested remaining cooldown (ms) before it's "safe" to move in-game after a

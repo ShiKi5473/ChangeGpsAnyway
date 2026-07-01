@@ -17,6 +17,13 @@ import android.widget.TextView
 import com.changegps.mock.JoyVector
 import com.changegps.mock.Mode
 import com.changegps.mock.MockController
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
 /**
  * Floating joystick that hovers over other apps (e.g. Pikmin Bloom). It only
@@ -32,13 +39,26 @@ class OverlayService : Service() {
 
     private lateinit var wm: WindowManager
     private var panel: View? = null
+    private var speedLabel: TextView? = null
     private lateinit var params: WindowManager.LayoutParams
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
     override fun onCreate() {
         super.onCreate()
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         MockController.setMode(Mode.JOYSTICK)
         addPanel()
+        observeSpeed()
+    }
+
+    /** Live-update the speed label from the shared state (Main dispatcher = safe UI). */
+    private fun observeSpeed() = scope.launch {
+        MockController.state
+            .map { it.currentSpeedKmh }
+            .distinctUntilChanged()
+            .collect { kmh ->
+                speedLabel?.text = "速度：%.1f km/h".format(kmh)
+            }
     }
 
     private fun addPanel() {
@@ -69,7 +89,16 @@ class OverlayService : Service() {
             listener = { v: JoyVector? -> MockController.setJoystick(v) }
         }
 
+        val speed = TextView(this).apply {
+            text = "速度：0.0 km/h"
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            setPadding(dp(4), dp(4), dp(4), dp(2))
+        }
+        speedLabel = speed
+
         container.addView(header)
+        container.addView(speed)
         container.addView(joystick, LinearLayout.LayoutParams(dp(140), dp(140)))
 
         params = WindowManager.LayoutParams(
@@ -132,7 +161,9 @@ class OverlayService : Service() {
     }
 
     override fun onDestroy() {
+        scope.cancel()
         MockController.setJoystick(null)
+        speedLabel = null
         panel?.let { runCatching { wm.removeView(it) } }
         panel = null
         super.onDestroy()

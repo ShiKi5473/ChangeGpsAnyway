@@ -32,6 +32,7 @@ fun OsmMap(
     onTap: (LatLng) -> Unit,
     modifier: Modifier = Modifier,
     centerOn: LatLng? = null,
+    target: LatLng? = null,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -48,7 +49,12 @@ fun OsmMap(
         }
     }
     val marker = remember { Marker(mapView) }
+    // Pending teleport target selected by tapping, shown before simulation starts.
+    val targetMarker = remember { Marker(mapView) }
     val polyline = remember { Polyline(mapView) }
+    // Numbered waypoint markers, rebuilt only when the waypoint list changes.
+    val waypointMarkers = remember { mutableListOf<Marker>() }
+    val lastWaypoints = remember { androidx.compose.runtime.mutableStateOf<List<LatLng>>(emptyList()) }
 
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -75,14 +81,48 @@ fun OsmMap(
             }
             mapView.overlays.add(MapEventsOverlay(receiver))
             marker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            targetMarker.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+            targetMarker.title = "選定地點"
+            targetMarker.isEnabled = false
+            // Make the route line clearly visible.
+            polyline.outlinePaint.color = android.graphics.Color.parseColor("#1976D2")
+            polyline.outlinePaint.strokeWidth = 8f
             mapView.overlays.add(polyline)
+            mapView.overlays.add(targetMarker)
             mapView.overlays.add(marker)
             mapView
         },
         update = { mv ->
             // Route polyline.
             polyline.setPoints(waypoints.map { GeoPoint(it.lat, it.lon) })
+            // Numbered waypoint markers — rebuild only when the list actually changes
+            // (the update block also runs on every emitted-position tick).
+            if (waypoints != lastWaypoints.value) {
+                waypointMarkers.forEach { mv.overlays.remove(it) }
+                waypointMarkers.clear()
+                waypoints.forEachIndexed { i, wp ->
+                    val m = Marker(mv).apply {
+                        position = GeoPoint(wp.lat, wp.lon)
+                        setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                        title = "路徑點 ${i + 1}"
+                        // Blue chip with white number — call before setTextIcon.
+                        setTextLabelBackgroundColor(android.graphics.Color.parseColor("#1976D2"))
+                        setTextLabelForegroundColor(android.graphics.Color.WHITE)
+                        setTextLabelFontSize(36)
+                        setTextIcon((i + 1).toString())
+                    }
+                    mv.overlays.add(m)
+                    waypointMarkers.add(m)
+                }
+                lastWaypoints.value = waypoints
+            }
+            // Pending teleport target (shown before simulation starts).
+            targetMarker.isEnabled = target != null
+            if (target != null) {
+                targetMarker.position = GeoPoint(target.lat, target.lon)
+            }
             // Current emitted position marker.
+            marker.isEnabled = emitted != null
             if (emitted != null) {
                 marker.position = GeoPoint(emitted.lat, emitted.lon)
                 marker.title = "目前模擬位置"
